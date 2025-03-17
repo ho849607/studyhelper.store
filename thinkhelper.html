@@ -1,190 +1,124 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <title>CKEditor + AI 실시간 추천 & 초안 작성</title>
+  <meta charset="UTF-8">
+  <title>CKEditor + 로컬 추천어 데모</title>
   <script src="https://cdn.ckeditor.com/ckeditor5/41.0.0/classic/ckeditor.js"></script>
   <style>
     body {
-      margin: 0; padding: 0;
       font-family: sans-serif;
-      background-color: #f4f4f4;
-    }
-    .container {
-      max-width: 1000px;
-      margin: 20px auto;
-      background-color: #fff;
-      padding: 20px;
+      margin: 20px;
+      background: #f4f4f4;
+      color: #333;
     }
     #editor {
       border: 1px solid #ccc;
       min-height: 200px;
       padding: 10px;
+      background: #fff;
     }
-    /* 추천 단어 목록 스타일 */
     .suggestion-box {
       position: absolute;
       background: #fff;
       border: 1px solid #ccc;
       border-radius: 4px;
       box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-      padding: 5px;
       z-index: 9999;
-      display: none; /* 기본적으로 숨김 */
+      display: none;
+      padding: 5px;
     }
     .suggestion-box div {
       padding: 5px 10px;
       cursor: pointer;
     }
     .suggestion-box div:hover {
-      background-color: #eee;
+      background: #eee;
     }
   </style>
 </head>
 <body>
-<div class="container">
-  <h1>CKEditor + AI 실시간 추천</h1>
-  <p>단어를 입력하면 람다(AI) 서버에서 추천 단어를 받아 표시합니다.  
-  추천 단어 클릭 시, “초안 작성” 여부를 물어 AI 초안을 삽입합니다.</p>
+  <h1>CKEditor - 로컬 추천어 데모</h1>
+  <p>마지막 글자가 "인"이면 로컬 추천어를 보여주고, 클릭 시 간단한 안내만 띄웁니다.</p>
 
   <!-- 에디터 영역 -->
   <div id="editor">여기에 문서를 작성하세요...</div>
-  
-  <!-- 추천 단어 박스 -->
+  <!-- 추천어 박스 -->
   <div id="suggestionBox" class="suggestion-box"></div>
 
-</div>
+  <script>
+    let editorInstance;
+    const suggestionBox = document.getElementById('suggestionBox');
 
-<script>
-  let editorInstance;
-  const suggestionBox = document.getElementById('suggestionBox');
+    // "인"을 마지막 글자로 입력하면 표시할 로컬 추천어
+    const LOCAL_SUGGESTIONS = ["인공지능", "인도", "인터넷", "인프라", "인쇄물"];
 
-  // 디바운스(300ms)로 AI 호출 횟수 제한
-  let debounceTimer = null;
-  function debounce(fn, delay) {
-    return function(...args) {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => fn(...args), delay);
-    };
-  }
-
-  // 1) 에디터 초기화
-  ClassicEditor
-    .create(document.querySelector('#editor'))
-    .then(editor => {
-      editorInstance = editor;
-      console.log("CKEditor 초기화 완료!");
-
-      // 내용 변경 시 디바운스 호출
-      editor.model.document.on('change:data', debounce(handleEditorChange, 300));
-    })
-    .catch(error => {
-      console.error('CKEditor 초기화 실패:', error);
-    });
-
-  // 2) 에디터 내용 변경 → 람다(AI) 추천 호출
-  async function handleEditorChange() {
-    if (!editorInstance) return;
-
-    // 현재 에디터 내용 (HTML)
-    const htmlContent = editorInstance.getData();
-    const tempDiv = document.createElement("div");
-    tempDiv.innerHTML = htmlContent;
-    const plainText = tempDiv.innerText || tempDiv.textContent || "";
-
-    // 마지막 단어 추출 예시: 띄어쓰기나 마침표 등으로 분리
-    const words = plainText.trim().split(/\s+/);
-    if (words.length === 0) {
-      hideSuggestions();
-      return;
-    }
-    const lastWord = words[words.length - 1];
-    if (lastWord.length === 0) {
-      hideSuggestions();
-      return;
-    }
-
-    console.log("마지막 단어:", lastWord);
-    
-    // 람다(AI)로 추천 요청
-    try {
-      // 예시: POST https://YOUR_LAMBDA_URL/autocomplete
-      // body: { prefix: lastWord }
-      const response = await fetch('https://YOUR_LAMBDA_URL/autocomplete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prefix: lastWord })
+    // CKEditor 초기화
+    ClassicEditor
+      .create(document.querySelector('#editor'))
+      .then(editor => {
+        editorInstance = editor;
+        console.log("CKEditor 초기화 완료!");
+        // 내용 변경 시 → handleEditorChange
+        editor.model.document.on('change:data', handleEditorChange);
+      })
+      .catch(err => {
+        console.error("CKEditor 초기화 실패:", err);
       });
-      if (!response.ok) {
-        throw new Error('추천 API 오류');
-      }
-      const data = await response.json();
-      // data.suggestions 가 ["인공지능", "인도", ...] 형태라고 가정
-      showSuggestions(data.suggestions || []);
-    } catch (err) {
-      console.error("추천 단어 호출 오류:", err);
-      hideSuggestions();
-    }
-  }
 
-  // 3) 추천 박스 표시
-  function showSuggestions(suggestions) {
-    if (!suggestions || suggestions.length === 0) {
-      hideSuggestions();
-      return;
-    }
-    
-    suggestionBox.innerHTML = '';
-    suggestions.forEach(item => {
+    function handleEditorChange() {
+      if (!editorInstance) return;
+      const html = editorInstance.getData();
+      // plain text 추출
       const div = document.createElement('div');
-      div.textContent = item;
-      div.addEventListener('click', () => onSuggestionClick(item));
-      suggestionBox.appendChild(div);
-    });
+      div.innerHTML = html;
+      const text = div.innerText || div.textContent || "";
 
-    // 박스 위치(데모)
-    suggestionBox.style.left = '200px';
-    suggestionBox.style.top = '300px';
-    suggestionBox.style.display = 'block';
-  }
-
-  function hideSuggestions() {
-    suggestionBox.style.display = 'none';
-  }
-
-  // 4) 추천 단어 클릭 시 → AI 초안 생성
-  async function onSuggestionClick(word) {
-    hideSuggestions();
-
-    const ok = confirm(`"${word}" 주제에 대한 AI 초안을 작성할까요?`);
-    if (!ok) return;
-
-    try {
-      // 실제 API 예시: POST /draft
-      // body: { topic: word }
-      const res = await fetch('https://YOUR_LAMBDA_URL/draft', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: word })
-      });
-      if (!res.ok) {
-        throw new Error('초안 생성 API 오류');
+      const words = text.trim().split(/\s+/);
+      if (!words.length) {
+        hideSuggestions();
+        return;
       }
-      const data = await res.json();
-      // data.draft: "주제 "xxx" 초안\n- 1...\n- 2..."
-      const draftContent = data.draft || `주제 "${word}" 초안이 없습니다.`;
+      const lastWord = words[words.length - 1];
+      // console.log("마지막 단어:", lastWord);
 
-      // 에디터에 초안 삽입
-      const currentHtml = editorInstance.getData();
-      const newHtml = currentHtml + `<p style="color:blue;">[AI 초안] ${draftContent.replace(/\n/g, '<br>')}</p>`;
-      editorInstance.setData(newHtml);
-
-      alert(`"${word}" 주제에 대한 초안이 추가되었습니다.`);
-    } catch (err) {
-      console.error(err);
-      alert("초안 생성 중 오류 발생: " + err);
+      // 마지막 글자가 "인"인가?
+      if (lastWord.endsWith("인")) {
+        showLocalSuggestions();
+      } else {
+        hideSuggestions();
+      }
     }
-  }
-</script>
+
+    function showLocalSuggestions() {
+      // suggestionBox에 LOCAL_SUGGESTIONS 표시
+      suggestionBox.innerHTML = '';
+      LOCAL_SUGGESTIONS.forEach(item => {
+        const div = document.createElement('div');
+        div.textContent = item;
+        div.addEventListener('click', () => onSuggestionClick(item));
+        suggestionBox.appendChild(div);
+      });
+      // 임의 위치
+      suggestionBox.style.left = '300px';
+      suggestionBox.style.top = '200px';
+      suggestionBox.style.display = 'block';
+    }
+
+    function hideSuggestions() {
+      suggestionBox.style.display = 'none';
+    }
+
+    function onSuggestionClick(word) {
+      hideSuggestions();
+      // 서버 없이 간단한 알림만 띄움
+      const ok = confirm(`"${word}" 주제 AI 초안을 작성할까요?\n(서버 호출은 생략된 로컬 데모)`);
+      if (!ok) return;
+      // 여기서는 초안 삽입 로직만 데모로
+      const currentHtml = editorInstance.getData();
+      const newHtml = currentHtml + `<p style="color:blue;">[AI 초안] (데모) ${word} 관련 내용이 추가되었습니다.</p>`;
+      editorInstance.setData(newHtml);
+      alert(`"${word}" 주제에 대한 내용이 에디터에 삽입되었습니다.`);
+    }
+  </script>
 </body>
 </html>
